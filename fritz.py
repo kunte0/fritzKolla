@@ -2,22 +2,14 @@
 # -*- coding: utf-8 -*-
 
 import fritzconnection as fc
-import sys
-import time
-from datetime import datetime, timedelta
+from datetime import timedelta
+import click
 
 
 ADDRESS = 'fritz.box'
-PASSWORD = 'yourpassword'
+PASSWORD = ''
 
-HELP = '[?] arguments: info/status, reconnect, hosts, api, logs, reboot'
-
-
-if(len(sys.argv) != 2):
-    print(HELP)
-    exit(1)
-
-
+# print header
 print('''
   ______    _ _
  |  ____|  (_) |
@@ -27,49 +19,84 @@ print('''
  |_|  |_|  |_|\__/___|
 
 ''')
-print('[+] Connecting to "{}" ... '.format(ADDRESS))
-c = fc.FritzConnection(address=ADDRESS, password=PASSWORD)
-
-# check connection by getting DeviceInfo
-try:
-    print('[+] Connected to ', c.call_action('DeviceInfo:1', 'GetInfo')['NewModelName'])
-except Exception as e:
-    print('[-] Could not connect!')
-    exit(1)
 
 
-if sys.argv[1] == 'info' or sys.argv[1] == 'status':
+@click.group()
+# @click.option('--password', prompt=True, hide_input=True, confirmation_prompt=False)
+def main(password=PASSWORD):
+    """
+    Small python script to talk to your fritzbox
+    """
+    global c
+    print('[+] Connecting to "{}" ... '.format(ADDRESS))
+    c = fc.FritzConnection(address=ADDRESS, password=password)
+
+    # check connection by getting DeviceInfo
+    try:
+        print('[+] Connected to ', c.call_action('DeviceInfo:1', 'GetInfo')['NewModelName'])
+    except Exception as e:
+        print('[-] Could not connect!')
+        print(e)
+        exit(1)
+
+
+@main.command()
+def info():
+    '''
+    Get basic info
+    '''
     status = c.call_action('WANIPConn:1', 'GetStatusInfo')
-    print('Status  ', status['NewConnectionStatus'])
-    print('Uptime  ', str(timedelta(seconds=status['NewUptime'])))
-    print('IP      ', c.call_action('WANIPConn:1','X_AVM_DE_GetExternalIPv6Address')['NewExternalIPv6Address'])
-    print('Dslite  ', c.call_action('WANCommonIFC:1', 'X_AVM_DE_GetDsliteStatus')['NewX_AVM_DE_DsliteStatus'])
+    link = c.call_action('WANCommonIFC', 'GetCommonLinkProperties')
+    print('Status        ', status['NewConnectionStatus'])
+    print('Provider Link ', link['NewPhysicalLinkStatus'])
+    print('Dslite        ', c.call_action('WANCommonIFC:1', 'X_AVM_DE_GetDsliteStatus')['NewX_AVM_DE_DsliteStatus'])
+    print('Access Type   ', link['NewWANAccessType'])
+    print('Uptime        ', str(timedelta(seconds=status['NewUptime'])))
+    print('IPv6          ', c.call_action('WANIPConn:1', 'X_AVM_DE_GetExternalIPv6Address')['NewExternalIPv6Address'])
+    print('IPv4          ', c.call_action('WANIPConn:1', 'GetExternalIPAddress')['NewExternalIPAddress'])
+    print('Down Rate     ', link['NewLayer1DownstreamMaxBitRate'] / 1000000)
+    print('Up Rate       ', link['NewLayer1UpstreamMaxBitRate'] / 1000000)
 
 
-elif sys.argv[1] == 'reconnect':
+@main.command()
+def reconnect():
+    '''
+    Reconnect your fritzbox, get new ip
+    '''
     print('[+] Reconnecting ...')
     c.reconnect()
 
 
-elif sys.argv[1] == 'reboot':
+@main.command()
+def reboot():
+    '''
+    Reboot your fritzbox
+    '''
     print('[+] Rebooting ...')
     c.call_action('DeviceConfig:1', 'Reboot')
     print('[+] done!')
 
 
-elif sys.argv[1] == 'hosts':
+@main.command()
+def hosts():
+    '''
+    List all active network clients
+    '''
     print('[+] Getting Hosts:')
     numHosts = c.call_action('Hosts:1', 'GetHostNumberOfEntries')['NewHostNumberOfEntries']
 
     for i in range(numHosts):
         host = c.call_action('Hosts:1', 'GetGenericHostEntry', NewIndex=i)
-        hostname = host['NewHostName']
-        hostip = host['NewIPAddress']
-        if host['NewActive'] == '1' and hostip and hostname != 'fritz.box':
-            print(hostname, ' === ', hostip)
+
+        if host['NewActive'] and host['NewHostName'] != 'fritz.box':
+            print(host['NewHostName'], '==', host['NewIPAddress'], '==', host['NewInterfaceType'])
 
 
-elif sys.argv[1] == 'logs' or sys.argv[1] == 'log':
+@main.command()
+def logs():
+    '''
+    Print logs
+    '''
     print('[+] Getting Logs:')
     logs = c.call_action('DeviceInfo:1', 'GetDeviceLog')['NewDeviceLog']
     # reverse order
@@ -77,9 +104,5 @@ elif sys.argv[1] == 'logs' or sys.argv[1] == 'log':
         print(line)
 
 
-elif sys.argv[1] == 'api':
-    fc.print_api(address=ADDRESS, password=PASSWORD)
-
-
-else:
-    print(HELP)
+if __name__ == '__main__':
+    main()
